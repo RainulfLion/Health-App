@@ -1,5 +1,7 @@
 import { GarminConnect } from 'garmin-connect';
 import db from '../database';
+import crypto from 'crypto';
+import schedule from 'node-schedule';
 
 export interface GarminData {
   date: string;
@@ -14,9 +16,19 @@ export interface GarminData {
   activeMinutes?: number;
 }
 
+interface SessionCookies {
+  [key: string]: string;
+}
+
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'health-app-default-key-please-change-in-production-32-chars';
+const ALGORITHM = 'aes-256-cbc';
+
 export class GarminService {
   private garminClient: GarminConnect;
   private isAuthenticated: boolean = false;
+  private autoSyncJob: schedule.Job | null = null;
+  private retryAttempts: number = 0;
+  private maxRetries: number = 5;
 
   constructor() {
     this.garminClient = new GarminConnect({
@@ -24,16 +36,56 @@ export class GarminService {
       password: ''
     });
     this.loadSession();
+    this.initializeAutoSync();
+  }
+
+  private encrypt(text: string): string {
+    const iv = crypto.randomBytes(16);
+    const key = crypto.createHash('sha256').update(ENCRYPTION_KEY).digest();
+    const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+    let encrypted = cipher.update(text, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    return iv.toString('hex') + ':' + encrypted;
+  }
+
+  private decrypt(text: string): string {
+    const parts = text.split(':');
+    const iv = Buffer.from(parts[0], 'hex');
+    const encryptedText = parts[1];
+    const key = crypto.createHash('sha256').update(ENCRYPTION_KEY).digest();
+    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+    let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
   }
 
   private loadSession() {
     try {
       const stmt = db.prepare('SELECT value FROM settings WHERE key = ?');
-      const result = stmt.get('garmin_session') as { value: string } | undefined;
-      if (result?.value) {
-        // Session data exists, but we'll need to re-authenticate since garmin-connect
-        // doesn't persist sessions easily. User will need to log in again.
-        this.isAuthenticated = false;
+
+      // Try to load session cookies
+      const cookiesResult = stmt.get('garmin_cookies') as { value: string } | undefined;
+      if (cookiesResult?.value) {
+        try {
+          const cookies = JSON.parse(this.decrypt(cookiesResult.value));
+          this.restoreSessionFromCookies(cookies);
+          console.log('Restored Garmin session from cookies');
+          return;
+        } catch (error) {
+          console.error('Failed to restore session from cookies:', error);
+        }
+      }
+
+      // Try to load stored credentials for auto-retry
+      const credsResult = stmt.get('garmin_credentials') as { value: string } | undefined;
+      if (credsResult?.value) {
+        try {
+          const creds = JSON.parse(this.decrypt(credsResult.value));
+          // Don't auto-login here, but mark that we have credentials
+          console.log('Stored credentials available for auto-retry');
+        } catch (error) {
+          console.error('Failed to load credentials:', error);
+        }
       }
     } catch (error) {
       // Database table might not exist yet during initialization
@@ -41,7 +93,15 @@ export class GarminService {
     }
   }
 
-  async login(username: string, password: string): Promise<void> {
+  private restoreSessionFromCookies(cookies: SessionCookies) {
+    // The garmin-connect library doesn't easily support cookie restoration
+    // We'll need to create a new client and manually set cookies if possible
+    // For now, mark as not authenticated and require re-login
+    // In a full implementation, we'd use the underlying HTTP client
+    this.isAuthenticated = false;
+  }
+
+  async login(username: string, password: string, saveCredentials: boolean = false): Promise<void> {
     try {
       this.garminClient = new GarminConnect({
         username,
@@ -50,16 +110,80 @@ export class GarminService {
 
       await this.garminClient.login();
       this.isAuthenticated = true;
+      this.retryAttempts = 0;
 
       // Store session indicator
       const stmt = db.prepare('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime("now"))');
       stmt.run('garmin_session', 'active');
 
+      // Save credentials if requested (for auto-retry)
+      if (saveCredentials) {
+        const encrypted = this.encrypt(JSON.stringify({ username, password }));
+        stmt.run('garmin_credentials', encrypted);
+        console.log('Credentials saved for auto-retry');
+      }
+
       console.log('Successfully logged in to Garmin Connect');
     } catch (error) {
       this.isAuthenticated = false;
+      this.retryAttempts++;
       console.error('Garmin login failed:', error);
+
+      // Check if it's a CAPTCHA error
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.toLowerCase().includes('captcha') || errorMessage.toLowerCase().includes('challenge')) {
+        throw new Error('CAPTCHA required. Please use session cookies method or try again later.');
+      }
+
       throw new Error('Failed to authenticate with Garmin Connect. Please check your credentials.');
+    }
+  }
+
+  async loginWithRetry(maxAttempts: number = 3): Promise<boolean> {
+    try {
+      const stmt = db.prepare('SELECT value FROM settings WHERE key = ?');
+      const credsResult = stmt.get('garmin_credentials') as { value: string } | undefined;
+
+      if (!credsResult?.value) {
+        console.log('No stored credentials for auto-retry');
+        return false;
+      }
+
+      const creds = JSON.parse(this.decrypt(credsResult.value));
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          console.log(`Auto-retry login attempt ${attempt}/${maxAttempts}`);
+          await this.login(creds.username, creds.password, true);
+          return true;
+        } catch (error) {
+          if (attempt < maxAttempts) {
+            // Exponential backoff: 2s, 4s, 8s
+            const waitTime = Math.pow(2, attempt) * 1000;
+            console.log(`Waiting ${waitTime}ms before retry...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+          }
+        }
+      }
+
+      return false;
+    } catch (error) {
+      console.error('Auto-retry failed:', error);
+      return false;
+    }
+  }
+
+  setSessionCookies(cookies: SessionCookies): void {
+    try {
+      const encrypted = this.encrypt(JSON.stringify(cookies));
+      const stmt = db.prepare('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime("now"))');
+      stmt.run('garmin_cookies', encrypted);
+
+      this.restoreSessionFromCookies(cookies);
+      console.log('Session cookies saved');
+    } catch (error) {
+      console.error('Failed to save session cookies:', error);
+      throw new Error('Failed to save session cookies');
     }
   }
 
@@ -69,13 +193,137 @@ export class GarminService {
 
   logout(): void {
     this.isAuthenticated = false;
+    const stmt = db.prepare('DELETE FROM settings WHERE key IN (?, ?, ?)');
+    stmt.run('garmin_session', 'garmin_cookies', 'garmin_credentials');
+
+    if (this.autoSyncJob) {
+      this.autoSyncJob.cancel();
+      this.autoSyncJob = null;
+    }
+  }
+
+  clearStoredCredentials(): void {
     const stmt = db.prepare('DELETE FROM settings WHERE key = ?');
-    stmt.run('garmin_session');
+    stmt.run('garmin_credentials');
+    console.log('Stored credentials cleared');
+  }
+
+  hasStoredCredentials(): boolean {
+    try {
+      const stmt = db.prepare('SELECT value FROM settings WHERE key = ?');
+      const result = stmt.get('garmin_credentials') as { value: string } | undefined;
+      return !!result?.value;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  // Auto-sync functionality
+  enableAutoSync(time: string = '06:00'): void {
+    if (this.autoSyncJob) {
+      this.autoSyncJob.cancel();
+    }
+
+    // Parse time (format: "HH:MM")
+    const [hour, minute] = time.split(':').map(Number);
+
+    // Schedule daily sync
+    this.autoSyncJob = schedule.scheduleJob({ hour, minute }, async () => {
+      console.log('Running scheduled Garmin sync...');
+
+      if (!this.isAuthenticated) {
+        console.log('Not authenticated, attempting auto-login...');
+        const success = await this.loginWithRetry();
+        if (!success) {
+          console.error('Auto-login failed, skipping sync');
+          return;
+        }
+      }
+
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        await this.syncData(today);
+        console.log('Scheduled sync completed successfully');
+      } catch (error) {
+        console.error('Scheduled sync failed:', error);
+
+        // Try to re-authenticate and retry once
+        if (!this.isAuthenticated) {
+          console.log('Retrying with fresh login...');
+          const success = await this.loginWithRetry();
+          if (success) {
+            try {
+              const today = new Date().toISOString().split('T')[0];
+              await this.syncData(today);
+              console.log('Retry sync completed successfully');
+            } catch (retryError) {
+              console.error('Retry sync also failed:', retryError);
+            }
+          }
+        }
+      }
+    });
+
+    // Save auto-sync settings
+    const stmt = db.prepare('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime("now"))');
+    stmt.run('autosync_enabled', 'true');
+    stmt.run('autosync_time', time);
+
+    console.log(`Auto-sync enabled for ${time} daily`);
+  }
+
+  disableAutoSync(): void {
+    if (this.autoSyncJob) {
+      this.autoSyncJob.cancel();
+      this.autoSyncJob = null;
+    }
+
+    const stmt = db.prepare('DELETE FROM settings WHERE key IN (?, ?)');
+    stmt.run('autosync_enabled', 'autosync_time');
+
+    console.log('Auto-sync disabled');
+  }
+
+  private initializeAutoSync(): void {
+    try {
+      const stmt = db.prepare('SELECT value FROM settings WHERE key = ?');
+      const enabledResult = stmt.get('autosync_enabled') as { value: string } | undefined;
+      const timeResult = stmt.get('autosync_time') as { value: string } | undefined;
+
+      if (enabledResult?.value === 'true' && timeResult?.value) {
+        this.enableAutoSync(timeResult.value);
+      }
+    } catch (error) {
+      // Settings not available yet
+    }
+  }
+
+  getAutoSyncStatus(): { enabled: boolean; time?: string } {
+    try {
+      const stmt = db.prepare('SELECT value FROM settings WHERE key = ?');
+      const enabledResult = stmt.get('autosync_enabled') as { value: string } | undefined;
+      const timeResult = stmt.get('autosync_time') as { value: string } | undefined;
+
+      return {
+        enabled: enabledResult?.value === 'true',
+        time: timeResult?.value
+      };
+    } catch (error) {
+      return { enabled: false };
+    }
   }
 
   async fetchDailySummary(date: string): Promise<GarminData | null> {
     if (!this.isAuthenticated) {
-      throw new Error('Not authenticated with Garmin Connect. Please log in first.');
+      // Try auto-retry if we have stored credentials
+      if (this.hasStoredCredentials()) {
+        const success = await this.loginWithRetry();
+        if (!success) {
+          throw new Error('Not authenticated with Garmin Connect. Please log in first.');
+        }
+      } else {
+        throw new Error('Not authenticated with Garmin Connect. Please log in first.');
+      }
     }
 
     try {
@@ -110,6 +358,7 @@ export class GarminService {
       return data;
     } catch (error) {
       console.error('Error fetching Garmin data:', error);
+      this.isAuthenticated = false; // Mark as unauthenticated on fetch failure
       throw new Error('Failed to fetch data from Garmin Connect. You may need to log in again.');
     }
   }

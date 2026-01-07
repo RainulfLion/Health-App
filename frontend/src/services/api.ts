@@ -69,9 +69,18 @@ export interface DashboardData {
 
 // Garmin endpoints
 export const garminAPI = {
-  login: (username: string, password: string) => api.post('/garmin/login', { username, password }),
+  login: (username: string, password: string, saveCredentials?: boolean) =>
+    api.post('/garmin/login', { username, password, saveCredentials }),
   logout: () => api.post('/garmin/logout'),
-  getStatus: () => api.get<{ isLoggedIn: boolean }>('/garmin/status'),
+  getStatus: () => api.get<{
+    isLoggedIn: boolean;
+    hasStoredCredentials: boolean;
+    autoSync: { enabled: boolean; time?: string };
+  }>('/garmin/status'),
+  clearCredentials: () => api.post('/garmin/clear-credentials'),
+  enableAutoSync: (time: string) => api.post('/garmin/autosync/enable', { time }),
+  disableAutoSync: () => api.post('/garmin/autosync/disable'),
+  getAutoSyncStatus: () => api.get<{ enabled: boolean; time?: string }>('/garmin/autosync/status'),
   sync: (date?: string) => api.post('/garmin/sync', { date }),
   syncRange: (days: number) => api.post('/garmin/sync-range', { days }),
   manualEntry: (data: GarminData) => api.post('/garmin/manual', data),

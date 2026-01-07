@@ -6,15 +6,18 @@ const router = express.Router();
 
 // Login to Garmin Connect
 router.post('/login', async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, saveCredentials } = req.body;
 
   if (!username || !password) {
     return res.status(400).json({ error: 'Username and password are required' });
   }
 
   try {
-    await garminService.login(username, password);
-    res.json({ message: 'Successfully logged in to Garmin Connect' });
+    await garminService.login(username, password, saveCredentials || false);
+    res.json({
+      message: 'Successfully logged in to Garmin Connect',
+      credentialsSaved: saveCredentials || false
+    });
   } catch (error: any) {
     res.status(401).json({ error: error.message });
   }
@@ -28,7 +31,41 @@ router.post('/logout', (req, res) => {
 
 // Check login status
 router.get('/status', (req, res) => {
-  res.json({ isLoggedIn: garminService.isLoggedIn() });
+  const autoSyncStatus = garminService.getAutoSyncStatus();
+  res.json({
+    isLoggedIn: garminService.isLoggedIn(),
+    hasStoredCredentials: garminService.hasStoredCredentials(),
+    autoSync: autoSyncStatus
+  });
+});
+
+// Clear stored credentials
+router.post('/clear-credentials', (req, res) => {
+  garminService.clearStoredCredentials();
+  res.json({ message: 'Stored credentials cleared' });
+});
+
+// Auto-sync management
+router.post('/autosync/enable', (req, res) => {
+  const { time } = req.body;
+  const syncTime = time || '06:00';
+
+  try {
+    garminService.enableAutoSync(syncTime);
+    res.json({ message: `Auto-sync enabled for ${syncTime}` });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/autosync/disable', (req, res) => {
+  garminService.disableAutoSync();
+  res.json({ message: 'Auto-sync disabled' });
+});
+
+router.get('/autosync/status', (req, res) => {
+  const status = garminService.getAutoSyncStatus();
+  res.json(status);
 });
 
 // Sync data from Garmin API
