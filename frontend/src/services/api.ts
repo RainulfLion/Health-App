@@ -69,7 +69,9 @@ export interface DashboardData {
 
 // Garmin endpoints
 export const garminAPI = {
-  setToken: (token: string) => api.post('/garmin/token', { token }),
+  login: (username: string, password: string) => api.post('/garmin/login', { username, password }),
+  logout: () => api.post('/garmin/logout'),
+  getStatus: () => api.get<{ isLoggedIn: boolean }>('/garmin/status'),
   sync: (date?: string) => api.post('/garmin/sync', { date }),
   syncRange: (days: number) => api.post('/garmin/sync-range', { days }),
   manualEntry: (data: GarminData) => api.post('/garmin/manual', data),

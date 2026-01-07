@@ -1,14 +1,22 @@
 import { useState, useEffect } from 'react';
 import { garminAPI, GarminData } from '../services/api';
 import { format, subDays } from 'date-fns';
-import { Download, Plus, Activity } from 'lucide-react';
+import { Download, Plus, Activity, LogIn, LogOut } from 'lucide-react';
 
 function GarminSync() {
   const [garminData, setGarminData] = useState<GarminData[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
   const [showManualEntry, setShowManualEntry] = useState(false);
+  const [showLoginForm, setShowLoginForm] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const [loginData, setLoginData] = useState({
+    username: '',
+    password: ''
+  });
 
   const [manualData, setManualData] = useState({
     date: format(new Date(), 'yyyy-MM-dd'),
@@ -21,8 +29,52 @@ function GarminSync() {
   });
 
   useEffect(() => {
+    checkLoginStatus();
     loadData();
   }, []);
+
+  const checkLoginStatus = async () => {
+    try {
+      const response = await garminAPI.getStatus();
+      setIsLoggedIn(response.data.isLoggedIn);
+    } catch (error) {
+      console.error('Error checking auth status:', error);
+      setIsLoggedIn(false);
+    } finally {
+      setCheckingAuth(false);
+    }
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setLoading(true);
+      await garminAPI.login(loginData.username, loginData.password);
+      setIsLoggedIn(true);
+      setShowLoginForm(false);
+      setMessage({ type: 'success', text: 'Successfully logged in to Garmin Connect!' });
+      setLoginData({ username: '', password: '' });
+      setTimeout(() => setMessage(null), 3000);
+    } catch (error: any) {
+      setMessage({
+        type: 'error',
+        text: error.response?.data?.error || 'Login failed. Please check your credentials.'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await garminAPI.logout();
+      setIsLoggedIn(false);
+      setMessage({ type: 'success', text: 'Logged out successfully' });
+      setTimeout(() => setMessage(null), 3000);
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -46,7 +98,7 @@ function GarminSync() {
     } catch (error: any) {
       setMessage({
         type: 'error',
-        text: error.response?.data?.error || 'Failed to sync. Make sure your access token is configured.'
+        text: error.response?.data?.error || 'Failed to sync. Please log in first.'
       });
     } finally {
       setSyncing(false);
@@ -95,39 +147,100 @@ function GarminSync() {
       )}
 
       <div className="card">
-        <h2>Automatic Sync</h2>
-        <p style={{ color: '#6b7280', marginBottom: '1.5rem' }}>
-          Connect your Garmin account to automatically sync sleep, activity, and health metrics.
-        </p>
-
-        <div style={{ marginBottom: '1.5rem' }}>
-          <h3>Setup Instructions:</h3>
-          <ol style={{ marginLeft: '1.5rem', color: '#6b7280', lineHeight: '1.8' }}>
-            <li>Register your app at <a href="https://developer.garmin.com/" target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6' }}>Garmin Developer Portal</a></li>
-            <li>Get your OAuth access token</li>
-            <li>Use the API to set your token: <code style={{ backgroundColor: '#f3f4f6', padding: '0.25rem 0.5rem', borderRadius: '4px' }}>POST /api/garmin/token</code></li>
-            <li>Click sync below to import your data</li>
-          </ol>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <h2>Garmin Connect</h2>
+          {!checkingAuth && (
+            isLoggedIn ? (
+              <button className="btn btn-secondary" onClick={handleLogout}>
+                <LogOut size={16} style={{ display: 'inline', marginRight: '0.5rem' }} />
+                Logout
+              </button>
+            ) : (
+              <button className="btn btn-primary" onClick={() => setShowLoginForm(!showLoginForm)}>
+                <LogIn size={16} style={{ display: 'inline', marginRight: '0.5rem' }} />
+                {showLoginForm ? 'Cancel' : 'Login'}
+              </button>
+            )
+          )}
         </div>
 
-        <div style={{ display: 'flex', gap: '1rem' }}>
-          <button
-            className="btn btn-primary"
-            onClick={() => handleSync(7)}
-            disabled={syncing}
-          >
-            <Download size={16} style={{ display: 'inline', marginRight: '0.5rem' }} />
-            {syncing ? 'Syncing...' : 'Sync Last 7 Days'}
-          </button>
-          <button
-            className="btn btn-secondary"
-            onClick={() => handleSync(30)}
-            disabled={syncing}
-          >
-            <Download size={16} style={{ display: 'inline', marginRight: '0.5rem' }} />
-            {syncing ? 'Syncing...' : 'Sync Last 30 Days'}
-          </button>
-        </div>
+        {checkingAuth ? (
+          <div className="loading">Checking authentication...</div>
+        ) : isLoggedIn ? (
+          <>
+            <p style={{ color: '#22c55e', marginBottom: '1.5rem', fontWeight: '500' }}>
+              ✓ Connected to Garmin Connect
+            </p>
+
+            <div style={{ marginBottom: '1.5rem' }}>
+              <p style={{ color: '#6b7280', marginBottom: '1rem' }}>
+                Automatically sync your sleep, activity, steps, heart rate, and health metrics from Garmin Connect.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+              <button
+                className="btn btn-primary"
+                onClick={() => handleSync(7)}
+                disabled={syncing}
+              >
+                <Download size={16} style={{ display: 'inline', marginRight: '0.5rem' }} />
+                {syncing ? 'Syncing...' : 'Sync Last 7 Days'}
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => handleSync(30)}
+                disabled={syncing}
+              >
+                <Download size={16} style={{ display: 'inline', marginRight: '0.5rem' }} />
+                {syncing ? 'Syncing...' : 'Sync Last 30 Days'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p style={{ color: '#6b7280', marginBottom: '1.5rem' }}>
+              Connect your Garmin account to automatically sync health data from your Garmin watch.
+            </p>
+
+            {showLoginForm && (
+              <form onSubmit={handleLogin} style={{ marginTop: '1.5rem' }}>
+                <div className="form-group">
+                  <label>Garmin Connect Email</label>
+                  <input
+                    type="email"
+                    value={loginData.username}
+                    onChange={(e) => setLoginData({ ...loginData, username: e.target.value })}
+                    placeholder="your.email@example.com"
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Password</label>
+                  <input
+                    type="password"
+                    value={loginData.password}
+                    onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
+                    placeholder="Your Garmin Connect password"
+                    required
+                  />
+                </div>
+
+                <div style={{ backgroundColor: '#fef3c7', border: '1px solid #fbbf24', borderRadius: '8px', padding: '1rem', marginBottom: '1rem' }}>
+                  <p style={{ fontSize: '0.875rem', color: '#92400e', margin: 0 }}>
+                    <strong>Note:</strong> Your credentials are used only to authenticate with Garmin and are not stored permanently.
+                    You'll need to log in again when you restart the app.
+                  </p>
+                </div>
+
+                <button type="submit" className="btn btn-primary" disabled={loading}>
+                  {loading ? 'Logging in...' : 'Login to Garmin Connect'}
+                </button>
+              </form>
+            )}
+          </>
+        )}
       </div>
 
       <div className="card">

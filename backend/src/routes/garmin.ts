@@ -4,16 +4,31 @@ import { format, subDays } from 'date-fns';
 
 const router = express.Router();
 
-// Set Garmin access token
-router.post('/token', (req, res) => {
-  const { token } = req.body;
+// Login to Garmin Connect
+router.post('/login', async (req, res) => {
+  const { username, password } = req.body;
 
-  if (!token) {
-    return res.status(400).json({ error: 'Access token is required' });
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password are required' });
   }
 
-  garminService.setAccessToken(token);
-  res.json({ message: 'Token saved successfully' });
+  try {
+    await garminService.login(username, password);
+    res.json({ message: 'Successfully logged in to Garmin Connect' });
+  } catch (error: any) {
+    res.status(401).json({ error: error.message });
+  }
+});
+
+// Logout from Garmin Connect
+router.post('/logout', (req, res) => {
+  garminService.logout();
+  res.json({ message: 'Logged out successfully' });
+});
+
+// Check login status
+router.get('/status', (req, res) => {
+  res.json({ isLoggedIn: garminService.isLoggedIn() });
 });
 
 // Sync data from Garmin API
@@ -34,13 +49,11 @@ router.post('/sync-range', async (req, res) => {
   const { days = 7 } = req.body;
 
   try {
-    const promises = [];
-    for (let i = 0; i < days; i++) {
-      const date = format(subDays(new Date(), i), 'yyyy-MM-dd');
-      promises.push(garminService.syncData(date));
-    }
-    await Promise.all(promises);
-    res.json({ message: `Synced ${days} days successfully` });
+    const endDate = format(new Date(), 'yyyy-MM-dd');
+    const startDate = format(subDays(new Date(), days - 1), 'yyyy-MM-dd');
+
+    const syncedDays = await garminService.syncDateRange(startDate, endDate);
+    res.json({ message: `Synced ${syncedDays} out of ${days} days successfully`, syncedDays });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
