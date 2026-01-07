@@ -22,9 +22,14 @@ export class GarminService {
   }
 
   private loadToken() {
-    const stmt = db.prepare('SELECT value FROM settings WHERE key = ?');
-    const result = stmt.get('garmin_access_token') as { value: string } | undefined;
-    this.accessToken = result?.value || null;
+    try {
+      const stmt = db.prepare('SELECT value FROM settings WHERE key = ?');
+      const result = stmt.get('garmin_access_token') as { value: string } | undefined;
+      this.accessToken = result?.value || null;
+    } catch (error) {
+      // Database table might not exist yet during initialization
+      this.accessToken = null;
+    }
   }
 
   setAccessToken(token: string) {
