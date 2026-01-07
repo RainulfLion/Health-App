@@ -329,15 +329,16 @@ export class GarminService {
     try {
       // Parse the date string (expected format: YYYY-MM-DD)
       const [year, month, day] = date.split('-').map(Number);
+      const dateObj = new Date(year, month - 1, day);
 
-      // Get sleep data
-      const sleepData = await this.garminClient.getSleep(new Date(year, month - 1, day));
+      // Get sleep data using the correct method
+      const sleepData = await this.garminClient.getSleepData(dateObj);
 
-      // Get daily stats
-      const dailyStats = await this.garminClient.getDailySummaryChart(new Date(year, month - 1, day));
+      // Get steps
+      const steps = await this.garminClient.getSteps(dateObj);
 
       // Get heart rate data
-      const heartRate = await this.garminClient.getHeartRate(new Date(year, month - 1, day));
+      const heartRate = await this.garminClient.getHeartRate(dateObj);
 
       // Calculate sleep quality from sleep data
       const sleepQuality = this.calculateSleepQuality(sleepData);
@@ -346,13 +347,13 @@ export class GarminService {
         date,
         sleepHours: sleepData?.dailySleepDTO?.sleepTimeSeconds ? sleepData.dailySleepDTO.sleepTimeSeconds / 3600 : undefined,
         sleepQuality,
-        steps: dailyStats?.totalSteps || undefined,
+        steps: steps || undefined,
         heartRateAvg: heartRate?.heartRateValues ? this.calculateAvgHeartRate(heartRate.heartRateValues) : undefined,
         heartRateResting: heartRate?.restingHeartRate || undefined,
-        stressLevel: dailyStats?.avgStressLevel || undefined,
-        energyLevel: dailyStats?.maxStress ? 100 - dailyStats.maxStress : undefined, // Inverse of stress as a proxy
-        caloriesBurned: dailyStats?.totalKilocalories || undefined,
-        activeMinutes: dailyStats?.activeTimeInMinutes || undefined
+        stressLevel: heartRate?.stressLevelAvg || undefined,
+        energyLevel: undefined, // Body Battery not available in this library version
+        caloriesBurned: undefined, // Would need additional API call
+        activeMinutes: undefined // Would need additional API call
       };
 
       return data;
