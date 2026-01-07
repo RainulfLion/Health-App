@@ -113,7 +113,7 @@ export class GarminService {
       this.retryAttempts = 0;
 
       // Store session indicator
-      const stmt = db.prepare('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime("now"))');
+      const stmt = db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))");
       stmt.run('garmin_session', 'active');
 
       // Save credentials if requested (for auto-retry)
@@ -176,7 +176,7 @@ export class GarminService {
   setSessionCookies(cookies: SessionCookies): void {
     try {
       const encrypted = this.encrypt(JSON.stringify(cookies));
-      const stmt = db.prepare('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime("now"))');
+      const stmt = db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))");
       stmt.run('garmin_cookies', encrypted);
 
       this.restoreSessionFromCookies(cookies);
@@ -265,7 +265,7 @@ export class GarminService {
     });
 
     // Save auto-sync settings
-    const stmt = db.prepare('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime("now"))');
+    const stmt = db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))");
     stmt.run('autosync_enabled', 'true');
     stmt.run('autosync_time', time);
 
