@@ -76,6 +76,48 @@ export function initDatabase() {
     )
   `);
 
+  // Weight logs table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS weight_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      weight_kg REAL NOT NULL,
+      notes TEXT,
+      source TEXT DEFAULT 'manual',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(date)
+    )
+  `);
+
+  // Mood logs table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS mood_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      mood_score INTEGER NOT NULL,
+      notes TEXT,
+      source TEXT DEFAULT 'manual',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(date)
+    )
+  `);
+
+  // Telegram check-in state table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS telegram_checkins (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      chat_id TEXT NOT NULL,
+      food_log TEXT,
+      weight_kg REAL,
+      mood_score INTEGER,
+      mood_notes TEXT,
+      completed INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(date, chat_id)
+    )
+  `);
+
   console.log('Database initialized successfully');
 }
 
