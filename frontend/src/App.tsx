@@ -4,6 +4,7 @@ import FoodLogger from './components/FoodLogger';
 import HabitTracker from './components/HabitTracker';
 import Insights from './components/Insights';
 import GarminSync from './components/GarminSync';
+import TelegramSetup from './components/TelegramSetup';
 import './App.css';
 
 function App() {
@@ -18,6 +19,7 @@ function App() {
             <li><NavLink to="/habits">Habits</NavLink></li>
             <li><NavLink to="/insights">Insights</NavLink></li>
             <li><NavLink to="/garmin">Garmin Sync</NavLink></li>
+            <li><NavLink to="/telegram">Telegram Bot</NavLink></li>
           </ul>
         </nav>
 
@@ -27,6 +29,7 @@ function App() {
           <Route path="/habits" element={<HabitTracker />} />
           <Route path="/insights" element={<Insights />} />
           <Route path="/garmin" element={<GarminSync />} />
+          <Route path="/telegram" element={<TelegramSetup />} />
         </Routes>
       </div>
     </Router>

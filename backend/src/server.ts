@@ -9,6 +9,8 @@ import garminRoutes from './routes/garmin';
 import foodRoutes from './routes/food';
 import habitsRoutes from './routes/habits';
 import analyticsRoutes from './routes/analytics';
+import telegramRoutes from './routes/telegram';
+import { initTelegramBot } from './services/telegram';
 
 dotenv.config();
 
@@ -43,6 +45,7 @@ app.use('/api/garmin', garminRoutes);
 app.use('/api/food', foodRoutes);
 app.use('/api/habits', habitsRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/telegram', telegramRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -59,6 +62,14 @@ app.listen(PORT, () => {
   console.log(`🚀 Health App API server running on http://localhost:${PORT}`);
   console.log(`📊 Database initialized`);
   console.log(`📁 Uploads directory: ${uploadsDir}`);
+
+  // Auto-start Telegram bot if token is saved
+  const db = require('./database').default;
+  const tokenRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('telegram_bot_token') as { value: string } | undefined;
+  if (tokenRow?.value) {
+    console.log('🤖 Restoring Telegram bot...');
+    initTelegramBot(tokenRow.value);
+  }
 });
 
 export default app;
