@@ -63,12 +63,20 @@ app.listen(PORT, () => {
   console.log(`📊 Database initialized`);
   console.log(`📁 Uploads directory: ${uploadsDir}`);
 
-  // Auto-start Telegram bot if token is saved
+  // Auto-start Telegram bot — check DB first, then fall back to .env
   const db = require('./database').default;
   const tokenRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('telegram_bot_token') as { value: string } | undefined;
-  if (tokenRow?.value) {
-    console.log('🤖 Restoring Telegram bot...');
-    initTelegramBot(tokenRow.value);
+  const token = tokenRow?.value || process.env.TELEGRAM_BOT_TOKEN;
+  if (token) {
+    if (!tokenRow?.value) {
+      // Persist env token to DB so the configure route can read status
+      db.prepare('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)').run('telegram_bot_token', token);
+    }
+    if (process.env.TELEGRAM_CHECKIN_TIME) {
+      db.prepare('INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)').run('telegram_checkin_time', process.env.TELEGRAM_CHECKIN_TIME);
+    }
+    console.log('🤖 Starting Telegram bot...');
+    initTelegramBot(token);
   }
 });
 
