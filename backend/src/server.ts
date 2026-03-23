@@ -75,6 +75,9 @@ app.listen(PORT, () => {
     if (process.env.TELEGRAM_CHECKIN_TIME) {
       db.prepare('INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)').run('telegram_checkin_time', process.env.TELEGRAM_CHECKIN_TIME);
     }
+    if (process.env.TELEGRAM_CHAT_ID) {
+      db.prepare('INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)').run('telegram_chat_id', process.env.TELEGRAM_CHAT_ID);
+    }
     console.log('🤖 Starting Telegram bot...');
     initTelegramBot(token);
   }
